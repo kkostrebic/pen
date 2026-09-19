@@ -1,0 +1,216 @@
+#!/bin/bash
+
+# Exit  immediately if a pipeline (which may consist of a single simple
+# command), a list, or a compound command (see SHELL GRAMMAR above), exits with
+# a non-zero status.
+set -e  
+
+# --- Constants ---
+CONFIG_DIR=".pen"
+CONFIG_FILE="$CONFIG_DIR/config.yaml"
+ENV_FILE="$CONFIG_DIR/env"
+TEMPLATE_CONFIG="/etc/pen/config/default.yaml"
+
+# If container alias/name is not provided by user through CLI, check if name is
+# configured through configuration file, if nothing else works use fallback and
+# return one based on the project dir(s) 
+resolve_container_name() {
+    local provided_name=$1
+    local configured_name=$(config_value '.container.name')
+
+    # man bash | CONDITIONAL EXPRESSIONS
+    # "-n" True if the length of string is non-zero.
+    if [[ -n "$provided_name" ]]; then
+        echo "$provided_name"
+    elif [[ -n "$configured_name" ]]; then
+        echo "$configured_name"
+    else
+        # Logic: combine parent and current dir, lowercase, replace
+        # non-alphanumeric with dash
+        local full_path=$(pwd)
+        local parent_dir=$(basename "$(dirname "$full_path")")
+        local current_dir=$(basename "$full_path")
+        
+        echo "${parent_dir}-${current_dir}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--/-/g'
+    fi
+}
+
+# --- Core Functions ---
+
+config_value() {
+    # "-r" unwrap scalar, print the value with no quotes, colours or comments.
+    # Defaults to true for yaml (default true)
+    # NOTE: Even it's included by default make it explicit (don't like implicit
+    # logic) 
+    yq -r "$1" "$CONFIG_FILE"
+}
+
+init_config() {
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        mkdir -p "$CONFIG_DIR"
+    fi
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        # Create configuration file from conf template and replace env vars
+        # with their corresponding values 
+        echo "Initializing default config..."
+        cat "$TEMPLATE_CONFIG" | envsubst > "$CONFIG_FILE"
+        # Set container name
+        local provided_container_name=$1
+        local container_name=$(resolve_container_name "$provided_container_name")
+        # NOTE: local var is not visible for yq, so passing env var just for yq 
+        container_name="$container_name" yq -i '.container.name = strenv(container_name)' $CONFIG_FILE
+        # Create dedicated file for env vars (this will be sourced through
+        # .bash_profile)
+        echo "Generating environment file..."
+        echo "$(config_value '.container.env')" | sed 's/: /=/' > $ENV_FILE
+    fi
+}
+
+# TODO: this one should also take template type as arg (if omitted use default one)
+pen_init() {
+    init_config $1
+
+    local container_name=$(config_value '.container.name')
+    echo "Using alias: $container_name"
+
+    # Check if container exists (grep/match exact name)
+    # Skip configuration logic if container already exists
+    if incus list --columns n | grep -q -w "$container_name"; then
+        echo "Container $container_name already exists. Skipping creation."
+    else
+        # Container Provisioning
+        local container_image=$(config_value '.container.image')
+        
+        echo "Launching container $container_name from $container_image..."
+        incus init "$container_image" "$container_name"
+
+        # Dir/file mounts
+        local mounts_count=$(config_value '.mounts | length')
+        for ((i=0; i<mounts_count; i++)); do
+            local src=$(i="$i" config_value '.mounts[env(i)].source')
+            local dst=$(i="$i" config_value '.mounts[env(i)].target')
+            local writeable=$(i="$i" config_value '.mounts[env(i)].writeable')
+            local disk_id="mount$(echo $dst | tr '/' '_')"
+            
+            echo "Mounting $src to $dst (writeable=$writeable)..."
+            incus config device add "$container_name" "$disk_id" disk path="$dst" source="$src" shift="$writeable"
+        done
+
+        # Env Mount & Shell Integration
+        echo "Integrating environment variables..."
+        # Start container
+        incus start "$container_name"
+        # Source env in .bash_profile
+        incus exec "$container_name" -- sh -c "echo source $ENV_FILE >> ~/.bash_profile"
+    fi
+}
+
+# pen_mount() {
+#     local mount_spec=$1
+#     init_config
+#
+#     local alias
+#     alias=$(resolve_alias "")
+#     # Attempt to get alias from config if not explicitly provided (which it isn't in -v)
+#     local config_alias
+#     config_alias=$(get_config_val '.container.alias')
+#     [[ -n "$config_alias" ]] && alias="$config_alias"
+#
+#     if [[ -n "$mount_spec" ]]; then
+#         local src="${mount_spec%%:*}"
+#         local tgt="${mount_spec#*:}"
+#
+#         log "Adding mount $src -> $tgt..."
+#         # Add to YAML using yq
+#         # We use a temporary file to avoid in-place edit issues with yq in some versions
+#         local tmp_yaml
+#         tmp_yaml=$(mktemp)
+#         yq eval ".mounts += [{\"source\": \"$src\", \"target\": \"$tgt\", \"shift\": true}]" "$CONFIG_FILE" > "$tmp_yaml"
+#         mv "$tmp_yaml" "$CONFIG_FILE"
+#
+#         # Apply to container
+#         local abs_src
+#         abs_src=$(readlink -f "$src")
+#         # Generate a unique device name based on target
+#         local device_name
+#         device_name=$(echo "$tgt" | sed 's/[^a-z0-9]/-/g')
+#         incus config device add "$alias" disk "$device_name" path="$tgt" source="$abs_src" shift=true
+#     else
+#         log "Syncing all mounts from config..."
+#         local mount_count
+#         mount_count=$(yq eval '.mounts | length' "$CONFIG_FILE")
+#         for ((i=0; i<mount_count; i++)); do
+#             local src
+#             src=$(yq eval ".mounts[$i].source" "$CONFIG_FILE")
+#             local tgt
+#             tgt=$(yq eval ".mounts[$i].target" "$CONFIG_FILE")
+#             local shift
+#             shift=$(yq eval ".mounts[$i].shift" "$CONFIG_FILE")
+#             local abs_src
+#             abs_src=$(readlink -f "$src")
+#             local device_name
+#             device_name=$(echo "$tgt" | sed 's/[^a-z0-9]/-/g')
+#             incus config device add "$alias" disk "$device_name" path="$tgt" source="$abs_src" shift="$shift"
+#         done
+#     fi
+# }
+
+# pen_recreate() {
+#     init_config
+#     local alias
+#     alias=$(resolve_alias "")
+#     local config_alias
+#     config_alias=$(get_config_val '.container.alias')
+#     [[ -n "$config_alias" ]] && alias="$config_alias"
+#
+#     log "Recreating container $alias..."
+#     incus stop "$alias" || true
+#     incus delete "$alias" || true
+#
+#     # Remove all devices specifically linked to this alias to be safe (though delete usually does)
+#     # we just call pen_init now.
+#     pen_init ""
+# }
+
+pen_bash() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+      local container_name=$(config_value '.container.name')
+      local workdir=$(config_value '.container.cwd')
+
+      # Get current container state ("-c s" - only return state column)
+      # pipeline to xargs will strip empty spaces
+      local container_state=$(incus ls "$container_name" -c s --format "compact,noheader" |xargs)
+
+      if [[ "$container_state" == "RUNNING" ]]; then
+        incus exec --mode interactive --cwd "$workdir" "$container_name" --user "$(id -u)" -- bash
+      elif [[ "$container_state" == "STOPPED" ]]; then
+        incus start "$container_name"
+        incus exec --mode interactive --cwd "$workdir" "$container_name" --user "$(id -u)" -- bash
+      else
+        echo "Initialize pen first"
+      fi
+    else
+      echo "Initialize pen first"
+    fi
+}
+
+# --- CLI Entrypoint ---
+
+case "$1" in
+    init)
+        pen_init "$2"
+        ;;
+    -v)
+        pen_mount "$2"
+        ;;
+    recreate)
+        pen_recreate
+        ;;
+    bash)
+        pen_bash
+        ;;
+    *)
+        echo "Usage: pen {init [alias]|-v [source:target]|recreate|bash}"
+        exit 1
+        ;;
+esac

@@ -1,0 +1,340 @@
+image:
+  distribution: "debian"
+  release: "trixie"
+
+source:
+  downloader: debootstrap
+  same_as: sid
+  url: https://deb.debian.org/debian/
+
+targets:
+  lxc:
+    create_message: |-
+      You just created a {{ image.description }} container.
+
+      To enable SSH, run: apt install openssh-server
+      No default root or user password are set by LXC.
+
+    config:
+    - type: all
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/debian.common.conf
+
+    - type: user
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/debian.userns.conf
+
+    - type: all
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/common.conf
+
+    - type: user
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/userns.conf
+    - type: all
+      content: |-
+        lxc.arch = {{ image.architecture_personality }}
+
+files:
+- path: /etc/hostname
+  generator: hostname
+
+- path: /etc/hosts
+  generator: hosts
+
+- path: /etc/resolvconf/resolv.conf.d/original
+  generator: remove
+
+- path: /etc/resolvconf/resolv.conf.d/tail
+  generator: remove
+
+- path: /etc/machine-id
+  generator: dump
+  content: uninitialized
+
+- path: /var/lib/dbus/machine-id
+  generator: remove
+
+- path: /etc/systemd/network/eth0.network
+  generator: dump
+  content: |-
+    [Match]
+    Name=eth0
+
+    [Network]
+    DHCP=true
+
+    [DHCPv4]
+    UseDomains=true
+    UseMTU=true
+
+    [DHCP]
+    ClientIdentifier=mac
+  types:
+  - container
+  variants:
+  - default
+
+- path: /etc/opensnitchd/default-config.json
+  generator: dump
+  content: |
+    {
+      "DefaultAction": "deny",
+      "Server": {
+        "Address": "10.250.11.1:50051",
+        "Enabled": true
+      }
+    }
+
+# - path: /etc/sysctl.d/70-disable-ipv6.conf
+#   generator: dump
+#   content: |-
+#     net.ipv6.conf.all.disable_ipv6 = 1
+#     net.ipv6.conf.default.disable_ipv6 = 1
+#     net.ipv6.conf.lo.disable_ipv6 = 1
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+  sets:
+  - packages:
+    - apt-utils
+    - bash
+    - bash-completion
+    - bc
+    - bzip2
+    - ca-certificates
+    - curl
+    - dialog
+    - diffutils
+    - fd-find
+    - findutils
+    - fzf
+    - git
+    - gnupg
+    - gpgsm
+    - hostname
+    - init
+    - iproute2
+    - iputils-ping
+    - jq
+    - keyutils
+    - less
+    - libcap2-bin
+    - libkrb5-3
+    - locales
+    - lsof
+    - man-db
+    - manpages
+    - ncurses-base
+    - ncurses-term
+    - net-tools
+    - netbase
+    - opensnitch
+    - openssh-client
+    - p11-kit-modules
+    - passwd
+    - pigz
+    - pinentry-curses
+    - procps
+    - ripgrep
+    - rsync
+    - sudo
+    - tcpdump
+    - time
+    - tmux
+    - traceroute
+    - tree
+    - tzdata
+    - udev
+    - unzip
+    - util-linux
+    - vim
+    - wget
+    - xz-utils
+    - yq
+    - zip
+    action: install
+    flags:
+    - "--no-install-recommends"
+
+  - packages:
+    - isc-dhcp-client
+    releases:
+    - bookworm
+    - trixie
+    action: install
+
+  - packages:
+    - debian-loong64-non-official-archive-keyring
+    action: install
+    early: true
+    architectures:
+    - loong64
+    releases:
+    - trixie
+
+  - packages:
+    - dbus
+    - systemd-resolved
+    action: install
+    early: true
+    releases:
+    - bookworm
+    - trixie
+    - forky
+
+  - packages:
+    - polkitd
+    action: install
+    architectures:
+    - amd64
+    - arm64
+    releases:
+    - trixie
+    - forky
+
+  - packages:
+    - pkexec
+    action: install
+    architectures:
+    - amd64
+    - arm64
+    releases:
+    - bookworm
+    - trixie
+    - forky
+
+  - packages:
+    - netplan.io
+    action: install
+    variants:
+    - cloud
+    releases:
+    - forky
+
+  repositories:
+  - name: sources.list
+    url: |-
+      deb http://deb.debian.org/debian {{ image.release }} main contrib
+      deb http://deb.debian.org/debian {{ image.release }}-updates main contrib
+      deb http://deb.debian.org/debian-security/ {{ image.release }}-security main contrib
+    architectures:
+    - amd64
+    - arm64
+    - armhf
+    - riscv64
+
+  - name: sources.list
+    url: |-
+      deb https://loong13.debian.net/debian-loong64/ {{ image.release }} main contrib
+      deb https://loong13.debian.net/debian-loong64/ {{ image.release }}-updates main contrib
+      deb https://loong13.debian.net/debian-loong64-security/ {{ image.release }}-security main contrib
+    architectures:
+    - loong64
+    releases:
+    - trixie
+
+  - name: sources.list
+    url: |-
+      deb http://deb.debian.org/debian {{ image.release }} main contrib
+      deb http://deb.debian.org/debian {{ image.release }}-updates main contrib
+      deb http://deb.debian.org/debian-security/ {{ image.release }}-security main contrib
+    architectures:
+    - loong64
+    releases:
+    - forky
+
+actions:
+
+# Set up non-root (dev) user
+# Use same UID/GID from the host to avoid possible file permission issues
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    groupadd -g 1000 dev || groupadd dev
+    useradd -u 1000 -g 1000 -m -s /bin/bash dev || useradd -g dev -m -s /bin/bash dev
+    echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Install mise https://mise.jdx.dev/installing-mise.html
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_INSTALL_FROM_GITHUB=1 sh
+    su -c "mise completion bash --install" dev
+    su -c "mise activate bash >> ~/.bashrc_profile 2>/dev/null" dev
+    su -c "mise use -g opencode neovim" dev
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # Enable networkd
+    systemctl enable systemd-networkd.service
+    systemctl enable systemd-networkd.socket
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # Enable systemd-resolved
+    systemctl enable systemd-resolved.service
+  releases:
+  - bookworm
+  - trixie
+  - forky
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    # Make sure the locale is built and functional
+    echo en_US.UTF-8 UTF-8 >> /etc/locale.gen
+    locale-gen en_US.UTF-8 UTF-8
+    update-locale LANG=en_US.UTF-8
+
+    # Cleanup underlying /run
+    mount -o bind / /mnt
+    rm -rf /mnt/run/*
+    umount /mnt
+
+    # Cleanup temporary shadow paths
+    rm /etc/*-
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+    mkdir -p /etc/apparmor.d/local
+    touch /etc/apparmor.d/local/sbin.dhclient
+  releases:
+  - trixie
+  - forky
+
+- trigger: post-files
+  action: |-
+    #!/bin/sh
+    set -eux
+
+    umount -l /etc/resolv.conf || true
+    ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+  releases:
+  - bookworm
+  - trixie
+  - forky
+
+# Enable OpenSnitch (firewall)
+- trigger: post-files
+  action: |-
+   #!/bin/sh
+   systemctl enable opensnitch
+
+mappings:
+  architecture_map: debian
