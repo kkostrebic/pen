@@ -8,7 +8,7 @@ I wanted to have a rootless and clean containerized environment for each project
 
 Existing solutions closest to my needs are distrobox and devcontainer, but with certain features that for my needs were obstacles or hard to change/maintain:
 
-- **DevContainers** - designed to be a strict environment for the *application* to run in, not a comfortable environment for the *developer* to work in. It lacks a familiar user/host environment. Also, because they are OCI-based, implementing per-process firewall logic for me was too difficult.
+- **DevContainers** - designed to be a strict environment for the *application* to run in, not a comfortable environment for the *developer* to work in. It lacks a familiar user/host environment. Because they are OCI-based, implementing per-process firewall logic for me was too difficult. Its (sort of) tight integration with IDE (VS Code) was not helping either.
 - **Distrobox** - gives you the familiar user environment by mapping the entire home directory, but it lacks an easy way to actually configure what to share, what should be read-only, and what should be writable. It's mostly meant for running software packaged for different Linux distros than the host and is not designed as a development environment with a built-in firewall in mind.
 
 ### What is `pen`?
