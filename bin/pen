@@ -98,10 +98,15 @@ pen_init() {
 
         # Env Mount & Shell Integration
         echo "Integrating environment variables..."
-        # Start container
-        incus start "$container_name"
-        # Source env in .bash_profile
-        incus exec "$container_name" -- sh -c "echo source $ENV_FILE >> ~/.bash_profile"
+        # Start container and give it a moment so that it handle network and
+        # pick up ip addresses
+        incus start "$container_name" && sleep 2
+
+        # Insert env vars to container
+        cat $ENV_FILE | incus exec "$container_name" -- tee --append /etc/environment > /dev/null
+
+        echo "Container created:"
+        incus ls "$container_name"
     fi
 }
 
@@ -181,13 +186,17 @@ pen_bash() {
       # pipeline to xargs will strip empty spaces
       local container_state=$(incus ls "$container_name" -c s --format "compact,noheader" |xargs)
 
+      if [[ "$container_state" == "STOPPED" ]]; then
+          # Start container and give it a moment so that it handle network and
+          # pick up ip addresses
+          incus start "$container_name" && sleep 2 && container_state="RUNNING"
+          incus ls "$container_name"
+      fi
+
       if [[ "$container_state" == "RUNNING" ]]; then
-        incus exec --mode interactive --cwd "$workdir" "$container_name" --user "$(id -u)" -- bash
-      elif [[ "$container_state" == "STOPPED" ]]; then
-        incus start "$container_name"
-        incus exec --mode interactive --cwd "$workdir" "$container_name" --user "$(id -u)" -- bash
+          incus exec "$container_name" -- su --login dev
       else
-        echo "Initialize pen first"
+          echo "Initialize pen first"
       fi
     else
       echo "Initialize pen first"

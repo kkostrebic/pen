@@ -266,9 +266,13 @@ actions:
   action: |-
     #!/bin/sh
     curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise MISE_INSTALL_FROM_GITHUB=1 sh
-    su -c "mise completion bash --install" dev
-    su -c "mise activate bash >> ~/.bashrc_profile 2>/dev/null" dev
-    su -c "mise use -g opencode neovim" dev
+    activation='eval "$(mise activate bash)"'
+    grep -qxF "$activation" /etc/bash.bashrc 2>/dev/null || printf '%s\n' "$activation" >> /etc/bash.bashrc
+
+    su dev <<'EOF'
+      mise completion bash --install
+      mise use -g opencode neovim
+    EOF
 
 - trigger: post-packages
   action: |-
