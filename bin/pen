@@ -38,11 +38,12 @@ resolve_container_name() {
 # --- Core Functions ---
 
 config_value() {
+    # Returns value of the given query, or nothing if the config file is missing
     # "-r" unwrap scalar, print the value with no quotes, colours or comments.
     # Defaults to true for yaml (default true)
-    # NOTE: Even it's included by default make it explicit (don't like implicit
-    # logic) 
-    yq -r "$1" "$CONFIG_FILE"
+    # NOTE: Even it's included (-r) by default make it explicit (don't like
+    #       implicit logic) 
+    [[ -f "$CONFIG_FILE" ]] && yq -r "$1" "$CONFIG_FILE"
 }
 
 init_config() {
@@ -160,22 +161,24 @@ pen_init() {
 #     fi
 # }
 
-# pen_recreate() {
-#     init_config
-#     local alias
-#     alias=$(resolve_alias "")
-#     local config_alias
-#     config_alias=$(get_config_val '.container.alias')
-#     [[ -n "$config_alias" ]] && alias="$config_alias"
-#
-#     log "Recreating container $alias..."
-#     incus stop "$alias" || true
-#     incus delete "$alias" || true
-#
-#     # Remove all devices specifically linked to this alias to be safe (though delete usually does)
-#     # we just call pen_init now.
-#     pen_init ""
-# }
+pen_destroy() {
+    local container_name=$(config_value '.container.name')
+    if [[ -z "$container_name" ]]; then
+        echo "No configuration found or container name not specified."
+        return 1
+    fi
+
+    read -p "Are you sure you want to stop and destroy container $container_name? (y/N): " confirm
+    if [[ "$confirm" == [yY] || "$confirm" == [yY][eE][sS] ]]; then
+        echo "Stopping and destroying $container_name..."
+        incus stop "$container_name" || true
+        incus delete "$container_name"
+        echo "Container destroyed."
+    else
+        echo "Operation cancelled."
+    fi
+}
+
 
 pen_bash() {
     if [[ -f "$CONFIG_FILE" ]]; then
@@ -215,11 +218,14 @@ case "$1" in
     recreate)
         pen_recreate
         ;;
+    destroy)
+        pen_destroy
+        ;;
     bash)
         pen_bash
         ;;
     *)
-        echo "Usage: pen {init [alias]|-v [source:target]|recreate|bash}"
+        echo "Usage: pen {init [alias]|-v [source:target]|recreate|destroy|bash}"
         exit 1
         ;;
 esac
