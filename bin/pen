@@ -101,6 +101,9 @@ pen_init() {
         echo "Integrating environment variables..."
         # Start container and give it a moment so that it handle network and
         # pick up ip addresses
+        # TODO: This sleep should be removed (not really a hard requirement to
+        # show ip addresses, but it would be nice to have those just using
+        # either event or something)
         incus start "$container_name" && sleep 2
 
         # Insert env vars to container
@@ -190,8 +193,9 @@ pen_bash() {
       local container_state=$(incus ls "$container_name" -c s --format "compact,noheader" |xargs)
 
       if [[ "$container_state" == "STOPPED" ]]; then
-          # Start container and give it a moment so that it handle network and
-          # pick up ip addresses
+          # TODO: This sleep should be removed (not really a hard requirement to
+          # show ip addresses, but it would be nice to have those just using
+          # either event or something)
           incus start "$container_name" && sleep 2 && container_state="RUNNING"
           incus ls "$container_name"
       fi
