@@ -114,56 +114,6 @@ pen_init() {
     fi
 }
 
-# pen_mount() {
-#     local mount_spec=$1
-#     init_config
-#
-#     local alias
-#     alias=$(resolve_alias "")
-#     # Attempt to get alias from config if not explicitly provided (which it isn't in -v)
-#     local config_alias
-#     config_alias=$(get_config_val '.container.alias')
-#     [[ -n "$config_alias" ]] && alias="$config_alias"
-#
-#     if [[ -n "$mount_spec" ]]; then
-#         local src="${mount_spec%%:*}"
-#         local tgt="${mount_spec#*:}"
-#
-#         log "Adding mount $src -> $tgt..."
-#         # Add to YAML using yq
-#         # We use a temporary file to avoid in-place edit issues with yq in some versions
-#         local tmp_yaml
-#         tmp_yaml=$(mktemp)
-#         yq eval ".mounts += [{\"source\": \"$src\", \"target\": \"$tgt\", \"shift\": true}]" "$CONFIG_FILE" > "$tmp_yaml"
-#         mv "$tmp_yaml" "$CONFIG_FILE"
-#
-#         # Apply to container
-#         local abs_src
-#         abs_src=$(readlink -f "$src")
-#         # Generate a unique device name based on target
-#         local device_name
-#         device_name=$(echo "$tgt" | sed 's/[^a-z0-9]/-/g')
-#         incus config device add "$alias" disk "$device_name" path="$tgt" source="$abs_src" shift=true
-#     else
-#         log "Syncing all mounts from config..."
-#         local mount_count
-#         mount_count=$(yq eval '.mounts | length' "$CONFIG_FILE")
-#         for ((i=0; i<mount_count; i++)); do
-#             local src
-#             src=$(yq eval ".mounts[$i].source" "$CONFIG_FILE")
-#             local tgt
-#             tgt=$(yq eval ".mounts[$i].target" "$CONFIG_FILE")
-#             local shift
-#             shift=$(yq eval ".mounts[$i].shift" "$CONFIG_FILE")
-#             local abs_src
-#             abs_src=$(readlink -f "$src")
-#             local device_name
-#             device_name=$(echo "$tgt" | sed 's/[^a-z0-9]/-/g')
-#             incus config device add "$alias" disk "$device_name" path="$tgt" source="$abs_src" shift="$shift"
-#         done
-#     fi
-# }
-
 pen_destroy() {
     local container_name=$(config_value '.container.name')
     if [[ -z "$container_name" ]]; then
