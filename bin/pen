@@ -151,7 +151,7 @@ pen_bash() {
       fi
 
       if [[ "$container_state" == "RUNNING" ]]; then
-          incus exec --user $(id -u) --cwd $(config_value '.container.cwd') "$container_name" -- bash 
+          incus exec --cwd $(config_value '.container.cwd') "$container_name" -- su $(config_value '.container.user')
       else
           echo "Initialize pen first"
       fi
