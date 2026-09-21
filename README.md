@@ -6,7 +6,7 @@ This project is initially made for my personal needs, learning, and experimentat
 
 I wanted to have a rootless and clean containerized environment for each project with related tools and runtimes, but at the same time didn't want to lose my familiar host configuration. Most importantly, I wanted a firewall that lets me easily control outbound requests both per project and per process. This helps me identify dependencies on external domains for both production and development environments, as well as block unwanted requests from different tools and apps.   
 
-https://github.com/user-attachments/assets/98a52d07-e121-4791-9941-7d48b286ed83
+https://github.com/user-attachments/assets/64291fbd-51b4-43ea-b1b1-aea3d9cec50e
 
 Existing solutions closest to my needs are distrobox and devcontainer, but with certain features that for my needs were obstacles or hard to change/maintain:
 
