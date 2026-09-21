@@ -1,6 +1,6 @@
 # pen (Project/Personal ENvironment)
 
-This project is initially made for my personal needs, learning, and experimentation, but maybe others might find it or the idea useful as well. It's opinionated and strictly Linux-based.
+This project is initially made for my personal needs, learning, and experimentation, but maybe others might find it or the idea useful as well. It's opinionated, strictly Linux-based and work in progress.
 
 ### Why?
 
