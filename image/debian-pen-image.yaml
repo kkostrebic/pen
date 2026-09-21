@@ -1,3 +1,5 @@
+# TODO: This config should be template that is configurable, i.e. user name,
+#       UID/GID, etc.
 image:
   distribution: "debian"
   release: "trixie"
@@ -254,6 +256,8 @@ actions:
 
 # Set up non-root (dev) user
 # Use same UID/GID from the host to avoid possible file permission issues
+# TODO: This config should be template that is configurable, i.e. user name,
+#       UID/GID, etc.
 - trigger: post-packages
   action: |-
     #!/bin/sh

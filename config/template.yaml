@@ -1,4 +1,5 @@
-version: "1.0"
+# TODO: Similar to image template, this also needs to be configurable and not
+#       like this with hardcoded values 
 container:
   image: "dev-template"
   name: "" # Optional: defaults to folder name
