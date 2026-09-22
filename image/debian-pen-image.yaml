@@ -81,16 +81,124 @@ files:
   variants:
   - default
 
-- path: /etc/opensnitchd/default-config.json
+- path: /usr/local/bin/setup-user.sh
   generator: dump
   content: |
+    #!/bin/bash
+
+    # Check if script is run as root
+    if [[ $EUID -ne 0 ]]; then
+       echo "Run with root privileges" 
+       exit 1
+    fi
+
+    # --- INPUTS ---
+    OLD_USER="dev"
+    NEW_USER=$1
+    NEW_UID=$2
+    NEW_GID=$3
+
+    # Exit if any of params is empty
+    if [[ -z "$OLD_USER" || -z "$NEW_USER" || -z "$NEW_UID" || -z "$NEW_GID" ]]; then
+        exit 1
+    fi
+
+    # Get current values
+    CURR_UID=$(id -u "$OLD_USER" 2>/dev/null)
+    CURR_GID=$(id -g "$OLD_USER" 2>/dev/null)
+    CURR_NAME=$(whoami) # Just a safety check
+
+    if [[ -z "$CURR_UID" ]]; then
+        echo "Error: User $OLD_USER does not exist."
+        exit 1
+    fi
+
+    # 1. Change Group ID
+    if [ "$CURR_GID" != "$NEW_GID" ]; then
+        groupmod -g "$NEW_GID" "$(id -gn "$OLD_USER")"
+    else
+        echo "GID is already $NEW_GID, skipping."
+    fi
+
+    # 2. Change Username and UID
+    if [ "$OLD_USER" != "$NEW_USER" ] || [ "$CURR_UID" != "$NEW_UID" ]; then
+        usermod -l "$NEW_USER" -u "$NEW_UID" "$OLD_USER"
+    else
+        echo "Username and UID are already correct, skipping."
+    fi
+
+    # Update reference for the next steps since the user name has changed
+    TARGET_USER=$NEW_USER
+    if [ "$OLD_USER" == "$NEW_USER" ]; then TARGET_USER=$OLD_USER; fi
+
+    # 3. Change Home Directory Path and Move Files
+    # We check if the home directory actually needs renaming
+    CURRENT_HOME=$(eval echo ~$TARGET_USER)
+    NEW_HOME="/home/$TARGET_USER"
+
+    if [ "$CURRENT_HOME" != "$NEW_HOME" ]; then
+        usermod -d "$NEW_HOME" -m "$TARGET_USER"
+    else
+        echo "Home directory path is already correct, skipping."
+    fi
+
+    # 4. Change Group Name to match new username
+    # Most Linux systems create a group named after the user
+    GROUP_NAME=$(id -gn "$TARGET_USER")
+    if [ "$GROUP_NAME" != "$TARGET_USER" ]; then
+        groupmod -n "$TARGET_USER" "$GROUP_NAME"
+    else
+        echo "Group name already matches username, skipping."
+    fi
+
+    # 5. Fix Global File Permissions
+    # Only run if UID or GID actually changed
+    chown -R "$TARGET_USER:$TARGET_USER" "$NEW_HOME"
+
+    # 6. Create new sudo rule for the new username
+    echo "$TARGET_USER ALL=(ALL:ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$TARGET_USER"
+    chmod 0440 "/etc/sudoers.d/$TARGET_USER"
+
+    echo "User setup completed"
+  mode: "755"
+  types:
+  - container
+
+- path: /usr/local/bin/configure-opensnitch.sh
+  generator: dump
+  content: |
+    #!/bin/bash
+
+    # 1. Get the default gateway IP address
+    # This looks for the default route and extracts the IP
+    GATEWAY_IP=$(ip route show default | awk '/default/ {print $3}')
+
+    if [ -z "$GATEWAY_IP" ]; then
+        echo "Error: Could not determine gateway IP address."
+        exit 1
+    fi
+
+    # 2. Define the config file path
+    CONFIG_FILE="/etc/opensnitchd/default-config.json"
+
+    # 3. Create the JSON content
+    # We use a heredoc to ensure the formatting is exact.
+    cat <<EOF > "$CONFIG_FILE"
     {
       "DefaultAction": "deny",
       "Server": {
-        "Address": "10.250.11.1:50051",
+        "Address": "${GATEWAY_IP}:50051",
         "Enabled": true
       }
     }
+    EOF
+
+    # 4. Restart opensnitchd to apply changes (assuming systemd)
+    if systemctl is-active --quiet opensnitchd; then
+        systemctl restart opensnitchd
+        echo "opensnitchd restarted."
+    fi
+  mode: "755"
 
 # - path: /etc/sysctl.d/70-disable-ipv6.conf
 #   generator: dump
@@ -255,15 +363,12 @@ packages:
 actions:
 
 # Set up non-root (dev) user
-# Use same UID/GID from the host to avoid possible file permission issues
-# TODO: This config should be template that is configurable, i.e. user name,
-#       UID/GID, etc.
+# Use expected UID/GID as initial values
 - trigger: post-packages
   action: |-
     #!/bin/sh
     groupadd -g 1000 dev || groupadd dev
     useradd -u 1000 -g 1000 -m -s /bin/bash dev || useradd -g dev -m -s /bin/bash dev
-    echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install mise https://mise.jdx.dev/installing-mise.html
 - trigger: post-packages

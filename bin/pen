@@ -9,7 +9,9 @@ set -e
 CONFIG_DIR=".pen"
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 ENV_FILE="$CONFIG_DIR/env"
-TEMPLATE_CONFIG="/etc/pen/config/default.yaml"
+
+readonly SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+TEMPLATE_CONFIG="$SCRIPT_DIR/../config/template.yaml"
 
 # If container alias/name is not provided by user through CLI, check if name is
 # configured through configuration file, if nothing else works use fallback and
@@ -83,9 +85,28 @@ pen_init() {
         local container_image=$(config_value '.container.image')
         
         echo "Launching container $container_name from $container_image..."
-        incus init "$container_image" "$container_name"
+        # TODO: This sleep should be removed (not really a hard requirement to
+        # show ip addresses, but it would be nice to have those just using
+        # either event or something)
+        incus launch "$container_image" "$container_name" && sleep 2
+
+        # Setup user at runtime (Host UID/GID)
+        echo "Initial configuration..."
+        local host_uid=$(id -u)
+        local host_gid=$(id -g)
+        local pen_user=$(config_value '.container.user')
+        echo "Configuring user ${pen_user} (UID: ${host_uid}, GID: ${host_gid}) inside container..."
+        incus exec "$container_name" -- /usr/local/bin/setup-user.sh "$pen_user" "$host_uid" "$host_gid"
+
+        echo "Configuring firewall (opensnitch)"
+        incus exec "$container_name" -- /usr/local/bin/configure-opensnitch.sh
+
+        # Insert env vars to container
+        echo "Integrating environment variables..."
+        cat $ENV_FILE | incus exec "$container_name" -- tee --append /etc/environment > /dev/null
 
         # Dir/file mounts
+        echo "Mounting volumes from host..."
         local mounts_count=$(config_value '.mounts | length')
         for ((i=0; i<mounts_count; i++)); do
             local src=$(i="$i" config_value '.mounts[env(i)].source')
@@ -96,18 +117,6 @@ pen_init() {
             echo "Mounting $src to $dst (writeable=$writeable)..."
             incus config device add "$container_name" "$disk_id" disk path="$dst" source="$src" shift="$writeable"
         done
-
-        # Env Mount & Shell Integration
-        echo "Integrating environment variables..."
-        # Start container and give it a moment so that it handle network and
-        # pick up ip addresses
-        # TODO: This sleep should be removed (not really a hard requirement to
-        # show ip addresses, but it would be nice to have those just using
-        # either event or something)
-        incus start "$container_name" && sleep 2
-
-        # Insert env vars to container
-        cat $ENV_FILE | incus exec "$container_name" -- tee --append /etc/environment > /dev/null
 
         echo "Container created:"
         incus ls "$container_name"
