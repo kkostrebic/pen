@@ -135,6 +135,7 @@ pen_destroy() {
         echo "Stopping and destroying $container_name..."
         incus stop "$container_name" || true
         incus delete "$container_name"
+        rm -rf "$CONFIG_DIR"
         echo "Container destroyed."
     else
         echo "Operation cancelled."
