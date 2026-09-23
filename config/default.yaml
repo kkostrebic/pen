@@ -1,10 +1,10 @@
 # TODO: Similar to image template, this also needs to be configurable and not
 #       like this with hardcoded values 
 container:
-  image: "dev-template"
+  image: "my-template"
   name: "" # Optional: defaults to folder name
-  user: "dev"
-  cwd: "/home/dev/workspace"
+  user: "hans"
+  cwd: "/home/hans/workspace"
   # Here define only env vars that need to passed from host to container 
   # All others (especially project related) can be handled by mise
   env:
@@ -12,20 +12,20 @@ container:
     OPENAI_BASE_URL: "${OPENAI_BASE_URL}"
 mounts:
   - source: "${PWD}"
-    target: "/home/dev/workspace"
+    target: "/home/hans/workspace"
     writeable: true
   - source: "${HOME}/.bashrc"
-    target: "/home/dev/.bashrc"
+    target: "/home/hans/.bashrc"
     writeable: true
   - source: "${HOME}/.config/git"
-    target: "/home/dev/.config/git"
+    target: "/home/hans/.config/git"
     writeable: true
   - source: "${HOME}/.config/tmux/config"
-    target: "/home/dev/.config/tmux/config"
+    target: "/home/hans/.config/tmux/config"
     writeable: true
   - source: "${HOME}/.config/tmux/tmux.conf"
-    target: "/home/dev/.config/tmux/tmux.conf"
+    target: "/home/hans/.config/tmux/tmux.conf"
     writeable: true
   - source: "${HOME}/.config/opencode"
-    target: "/home/dev/.config/opencode"
+    target: "/home/hans/.config/opencode"
     writeable: true

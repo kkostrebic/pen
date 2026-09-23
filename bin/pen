@@ -11,7 +11,7 @@ CONFIG_FILE="$CONFIG_DIR/config.yaml"
 ENV_FILE="$CONFIG_DIR/env"
 
 readonly SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-TEMPLATE_CONFIG="$SCRIPT_DIR/../config/template.yaml"
+TEMPLATE_CONFIG="$SCRIPT_DIR/../config/default.yaml"
 
 # If container alias/name is not provided by user through CLI, check if name is
 # configured through configuration file, if nothing else works use fallback and
@@ -49,16 +49,18 @@ config_value() {
 }
 
 init_config() {
+    local template_path=${1:-$TEMPLATE_CONFIG}
+    local provided_container_name=$2
+
     if [[ ! -d "$CONFIG_DIR" ]]; then
         mkdir -p "$CONFIG_DIR"
     fi
     if [[ ! -f "$CONFIG_FILE" ]]; then
         # Create configuration file from conf template and replace env vars
         # with their corresponding values 
-        echo "Initializing default config..."
-        cat "$TEMPLATE_CONFIG" | envsubst > "$CONFIG_FILE"
+        echo "Initializing config from $template_path..."
+        cat "$template_path" | envsubst > "$CONFIG_FILE"
         # Set container name
-        local provided_container_name=$1
         local container_name=$(resolve_container_name "$provided_container_name")
         # NOTE: local var is not visible for yq, so passing env var just for yq 
         container_name="$container_name" yq -i '.container.name = strenv(container_name)' $CONFIG_FILE
@@ -71,24 +73,52 @@ init_config() {
 
 # TODO: this one should also take template type as arg (if omitted use default one)
 pen_init() {
-    init_config $1
+    local container_name=""
+    local template_name=""
 
-    local container_name=$(config_value '.container.name')
-    echo "Using alias: $container_name"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n)
+                container_name="$2"
+                shift 2
+                ;;
+            -t)
+                template_name="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    local template_path="$TEMPLATE_CONFIG"
+    if [[ -n "$template_name" ]]; then
+        template_path="$SCRIPT_DIR/../config/${template_name}.yaml"
+        if [[ ! -f "$template_path" ]]; then
+            echo "Error: Template $template_name not found at $template_path"
+            return 1
+        fi
+    fi
+
+    init_config "$template_path" "$container_name"
+
+    local resolved_name=$(config_value '.container.name')
+    echo "Using alias: $resolved_name"
 
     # Check if container exists (grep/match exact name)
     # Skip configuration logic if container already exists
-    if incus list --columns n | grep -q -w "$container_name"; then
-        echo "Container $container_name already exists. Skipping creation."
+    if incus list --columns n | grep -q -w "$resolved_name"; then
+        echo "Container $resolved_name already exists. Skipping creation."
     else
         # Container Provisioning
         local container_image=$(config_value '.container.image')
         
-        echo "Launching container $container_name from $container_image..."
+        echo "Launching container $resolved_name from $container_image..."
         # TODO: This sleep should be removed (not really a hard requirement to
         # show ip addresses, but it would be nice to have those just using
         # either event or something)
-        incus launch "$container_image" "$container_name" && sleep 2
+        incus launch "$container_image" "$resolved_name" && sleep 2
 
         # Setup user at runtime (Host UID/GID)
         echo "Initial configuration..."
@@ -96,14 +126,14 @@ pen_init() {
         local host_gid=$(id -g)
         local pen_user=$(config_value '.container.user')
         echo "Configuring user ${pen_user} (UID: ${host_uid}, GID: ${host_gid}) inside container..."
-        incus exec "$container_name" -- /usr/local/bin/setup-user.sh "$pen_user" "$host_uid" "$host_gid"
+        incus exec "$resolved_name" -- /usr/local/bin/setup-user.sh "$pen_user" "$host_uid" "$host_gid"
 
         echo "Configuring firewall (opensnitch)"
-        incus exec "$container_name" -- /usr/local/bin/configure-opensnitch.sh
+        incus exec "$resolved_name" -- /usr/local/bin/configure-opensnitch.sh
 
         # Insert env vars to container
         echo "Integrating environment variables..."
-        cat $ENV_FILE | incus exec "$container_name" -- tee --append /etc/environment > /dev/null
+        cat $ENV_FILE | incus exec "$resolved_name" -- tee --append /etc/environment > /dev/null
 
         # Dir/file mounts
         echo "Mounting volumes from host..."
@@ -115,11 +145,11 @@ pen_init() {
             local disk_id="mount$(echo $dst | tr '/' '_')"
             
             echo "Mounting $src to $dst (writeable=$writeable)..."
-            incus config device add "$container_name" "$disk_id" disk path="$dst" source="$src" shift="$writeable"
+            incus config device add "$resolved_name" "$disk_id" disk path="$dst" source="$src" shift="$writeable"
         done
 
         echo "Container created:"
-        incus ls "$container_name"
+        incus ls "$resolved_name"
     fi
 }
 
@@ -174,13 +204,7 @@ pen_bash() {
 
 case "$1" in
     init)
-        pen_init "$2"
-        ;;
-    -v)
-        pen_mount "$2"
-        ;;
-    recreate)
-        pen_recreate
+        pen_init "${@:2}"
         ;;
     destroy)
         pen_destroy
@@ -189,7 +213,7 @@ case "$1" in
         pen_bash
         ;;
     *)
-        echo "Usage: pen {init [alias]|-v [source:target]|recreate|destroy|bash}"
+        echo "Usage: pen {init [-n alias] [-t template]|destroy|bash}"
         exit 1
         ;;
 esac
