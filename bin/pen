@@ -96,7 +96,6 @@ init_config() {
     fi
 }
 
-# TODO: this one should also take template type as arg (if omitted use default one)
 pen_init() {
     local container_name=""
     local template_name=""
@@ -145,10 +144,9 @@ pen_init() {
         local container_image=$(config_value '.container.image')
         
         echo "Launching container $resolved_name from $container_image..."
-        # TODO: This sleep should be removed (not really a hard requirement to
-        # show ip addresses, but it would be nice to have those just using
-        # either event or something)
-        incus launch "$container_image" "$resolved_name" && sleep 2
+        # NOTE: Wait for IPv4 address as that is used to configure opensnitch
+        #       firewall couple of lines below
+        incus launch "$container_image" "$resolved_name" && incus wait "$resolved_name" ipv4 --interval 2 --timeout 10
 
         # Setup user at runtime (Host UID/GID)
         echo "Initial configuration..."
@@ -214,14 +212,10 @@ pen_bash() {
       local container_state=$(incus ls "$container_name" -c s --format "compact,noheader" |xargs)
 
       if [[ "$container_state" == "STOPPED" ]]; then
-          # TODO: This sleep should be removed (not really a hard requirement to
-          # show ip addresses, but it would be nice to have those just using
-          # either event or something)
-          incus start "$container_name" && sleep 2 && container_state="RUNNING"
-          incus ls "$container_name"
+          incus start "$container_name"
       fi
 
-      if [[ "$container_state" == "RUNNING" ]]; then
+      if incus wait "$container_name" status=RUNNING --interval 2 --timeout 10; then
           incus exec --cwd $(config_value '.container.cwd') "$container_name" -- su $(config_value '.container.user')
       else
           echo "Initialize pen first"
