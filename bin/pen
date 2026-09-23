@@ -13,9 +13,24 @@ ENV_FILE="$CONFIG_DIR/env"
 readonly SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 TEMPLATE_CONFIG="$SCRIPT_DIR/../config/default.yaml"
 
-# If container alias/name is not provided by user through CLI, check if name is
-# configured through configuration file, if nothing else works use fallback and
-# return one based on the project dir(s) 
+# Username logic:
+# username-through-cli -> configured-through-template -> host-username
+resolve_user() {
+    local provided_user=$1
+    local template_path=$2
+    local configured_user=$(yq -r '.container.user' "$template_path" 2>/dev/null)
+
+    if [[ -n "$provided_user" ]]; then
+        echo "$provided_user"
+    elif [[ -n "$configured_user" && "$configured_user" != "null" ]]; then
+        echo "$configured_user"
+    else
+        whoami
+    fi
+}
+
+# Container name logic:
+# name-through-cli -> cofigured-through-template -> based-on-current-dir
 resolve_container_name() {
     local provided_name=$1
     local configured_name=$(config_value '.container.name')
@@ -51,6 +66,7 @@ config_value() {
 init_config() {
     local template_path=${1:-$TEMPLATE_CONFIG}
     local provided_container_name=$2
+    local provided_user=$3
 
     if [[ ! -d "$CONFIG_DIR" ]]; then
         mkdir -p "$CONFIG_DIR"
@@ -64,6 +80,15 @@ init_config() {
         local container_name=$(resolve_container_name "$provided_container_name")
         # NOTE: local var is not visible for yq, so passing env var just for yq 
         container_name="$container_name" yq -i '.container.name = strenv(container_name)' $CONFIG_FILE
+        
+        # Set user
+        local resolved_user=$(resolve_user "$provided_user" "$template_path")
+        resolved_user="$resolved_user" yq -i '.container.user = strenv(resolved_user)' $CONFIG_FILE
+        
+        # Resolve home directory and replace all occurrences in the config file
+        local container_home="/home/$resolved_user"
+        sed -i "s|~CONTAINER_HOME~|$container_home|g" "$CONFIG_FILE"
+
         # Create dedicated file for env vars (this will be sourced through
         # .bash_profile)
         echo "Generating environment file..."
@@ -75,6 +100,7 @@ init_config() {
 pen_init() {
     local container_name=""
     local template_name=""
+    local user_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -84,6 +110,10 @@ pen_init() {
                 ;;
             -t)
                 template_name="$2"
+                shift 2
+                ;;
+            -u)
+                user_override="$2"
                 shift 2
                 ;;
             *)
@@ -101,7 +131,7 @@ pen_init() {
         fi
     fi
 
-    init_config "$template_path" "$container_name"
+    init_config "$template_path" "$container_name" "$user_override"
 
     local resolved_name=$(config_value '.container.name')
     echo "Using alias: $resolved_name"
@@ -130,7 +160,7 @@ pen_init() {
 
         echo "Configuring firewall (opensnitch)"
         incus exec "$resolved_name" -- /usr/local/bin/configure-opensnitch.sh
-
+        
         # Insert env vars to container
         echo "Integrating environment variables..."
         cat $ENV_FILE | incus exec "$resolved_name" -- tee --append /etc/environment > /dev/null
@@ -142,6 +172,7 @@ pen_init() {
             local src=$(i="$i" config_value '.mounts[env(i)].source')
             local dst=$(i="$i" config_value '.mounts[env(i)].target')
             local writeable=$(i="$i" config_value '.mounts[env(i)].writeable')
+            
             local disk_id="mount$(echo $dst | tr '/' '_')"
             
             echo "Mounting $src to $dst (writeable=$writeable)..."
@@ -213,7 +244,7 @@ case "$1" in
         pen_bash
         ;;
     *)
-        echo "Usage: pen {init [-n alias] [-t template]|destroy|bash}"
+        echo "Usage: pen {init [-n alias] [-t template] [-u user]|destroy|bash}"
         exit 1
         ;;
 esac
