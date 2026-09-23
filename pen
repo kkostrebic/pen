@@ -11,7 +11,7 @@ CONFIG_FILE="$CONFIG_DIR/config.yaml"
 ENV_FILE="$CONFIG_DIR/env"
 
 readonly SCRIPT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-TEMPLATE_CONFIG="$SCRIPT_DIR/../config/default.yaml"
+TEMPLATE_CONFIG="$SCRIPT_DIR/config/default.yaml"
 
 # Username logic:
 # username-through-cli -> configured-through-template -> host-username
@@ -123,7 +123,7 @@ pen_init() {
 
     local template_path="$TEMPLATE_CONFIG"
     if [[ -n "$template_name" ]]; then
-        template_path="$SCRIPT_DIR/../config/${template_name}.yaml"
+        template_path="$SCRIPT_DIR/config/${template_name}.yaml"
         if [[ ! -f "$template_path" ]]; then
             echo "Error: Template $template_name not found at $template_path"
             return 1
